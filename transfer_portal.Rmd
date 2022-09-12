@@ -1,0 +1,138 @@
+```{r}
+library(baseballr)
+library(tidyverse)
+library(mltools)
+library(data.table)
+#library(stringr)
+```
+
+```{r}
+# school_data <- ncaa_school_id_lu(school_name = "Nebraska")
+# school_id <- tail(school_data, n=1)
+# school_id <- school_id$school_id
+# schedule_info <- ncaa_schedule_info(teamid = school_id, year = 2022)
+```
+
+```{r}
+# roster <- ncaa_baseball_roster(school_id, 2022)
+# box <- ncaa_game_logs(player_id = 2490614, year = 2022)
+# lineup <- ncaa_lineups(game_info_url = "https://stats.ncaa.org/contests/2168040/box_score", year = 2022)
+```
+
+```{r}
+start_year = 2021
+Year = 2022
+team_data <- ncaa_team_lu %>%filter(year>start_year) %>% select(-year)
+teams <- unique(team_data) %>% select(school, school_id)
+team_ids <- teams$school_id
+
+# filter out the first 3 team ids
+team_ids <- team_ids[c(1:3)]
+```
+
+```{r}
+season_lineups <- ncaa_lineups(game_info_url = "https://stats.ncaa.org/contests/2184698/box_score", year = Year)
+
+for (i in team_ids){
+  School <- teams %>% filter(school_id == i)
+  School <- School$school
+  School <- School[1]
+  schedule_info <- ncaa_schedule_info(teamid = i, Year)
+  game_urls <- schedule_info$game_info_url
+  game_url <- sprintf("%s", game_urls) 
+  # season_lineups <- ncaa_lineups(game_info_url = game_url[1], year = Year) %>% filter(school == School)
+
+  ## when there is an error, skip q
+  for (q in game_url){
+    #skip_to_next <- FALSE
+    try(lineup <- ncaa_lineups(game_info_url = q, year = Year))
+    lineup <- lineup %>% filter(school == School)
+                #  , error = function(e){skip_to_next <<- TRUE})
+    #if(skip_to_next) { next }
+    season_lineups <<- rbind(season_lineups, lineup)
+  }
+}
+
+#  for (q in game_url) {
+#      School <- teams %>% filter(school_id == i)
+ #     School <- School$school
+  #    School <- School[1]
+   #   lineup <- ncaa_lineups(game_info_url = q, year = Year) 
+    #  season_lineups <<- rbind(season_lineups, lineup) %>% filter(school == School)
+  #}
+#}
+```
+
+```{r}
+# inputs
+team = "Nebraska"
+Year = 2022
+player = "Jessen, Luke"
+
+school_data <- ncaa_school_id_lu(school_name = team)
+school_data <- school_data %>% filter(school == team)
+school_id <- tail(school_data, n=1)
+school_id <- school_id$school_id
+schedule_info <- ncaa_schedule_info(teamid = school_id, Year)
+game_urls <- schedule_info$game_info_url
+
+# for (i in game_urls) {
+#   a <- i
+#   game_url <- sprintf("%s", a)
+#   print(game_url)
+# }
+```
+
+```{r}
+
+#season_lineups <- ncaa_lineups(game_info_url = game_url, year = Year)
+```
+
+```{r}
+game_url <- sprintf("%s", game_urls)
+season_lineups <- ncaa_lineups(game_info_url = game_url[1], year = Year)
+
+for (i in game_url) {
+  lineup <- ncaa_lineups(game_info_url = i, year = Year)
+  season_lineups <<- rbind(season_lineups, lineup)
+}
+```
+
+```{r}
+player <- season_lineups %>% filter(playerName == player)
+
+test <- player %>% group_by(playerName)
+```
+
+```{r}
+#split multiple position appearances for easier one hot encoding
+data <- player
+#str_split_fixed(data$position, '/', 3) -> data[c('Starts', 'position2', 'position3')]
+data <- data %>% separate(position, c('position1', 'position2', 'position3'), "/")
+
+position_1 <- data.frame(data$position1)
+position_1 <- position_1 %>% rename(Appearances = data.position1)
+position_2 <- data.frame(data$position2)
+position_2 <- position_2 %>% rename(Appearances = data.position2)
+position_3 <- data.frame(data$position3)
+position_3 <- position_3 %>% rename(Appearances = data.position3)
+appearances <- rbind(position_1, position_2, position_3) %>% na.omit()
+```
+
+```{r}
+appearances$Appearances <- as.factor(appearances$Appearances)
+# data$position2 <- as.factor(data$position2)
+# data$position3 <- as.factor(data$position3)
+newdata <- one_hot(as.data.table(appearances))
+
+shiny_data <- newdata %>% summarise(across(,sum))
+```
+
+```{r}
+barplot(table(player$position))
+```
+
+
+```{r}
+write.csv(season_lineups, "season_lineups.csv", row.names=FALSE, quote=FALSE)
+```

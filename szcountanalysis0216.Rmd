@@ -1,0 +1,49 @@
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(zoo)
+library(corrr)
+```
+
+```{r}
+#data from fangraphs: https://blogs.fangraphs.com/the-size-of-the-strike-zone-by-count/
+library(readxl)
+szcountfg <- read_excel("~/szcountfg.xlsx")
+View(szcountfg)
+```
+
+```{r}
+szcountfg <- szcountfg %>% mutate_at(1:4, as.numeric)
+szcountfg <- szcountfg %>% mutate(avgszsize = (LHSZsize+ RHSZsize)/2)
+```
+
+
+```{r}
+lm_model <- linear_reg() %>%
+    set_engine("lm")
+
+fit_lm <- lm_model %>%
+  fit(avgszsize ~ Balls + Strikes, data = szcountfg)
+
+trainresults <- szcountfg %>%
+    bind_cols(predict(fit_lm, szcountfg))
+
+metrics(trainresults, truth = avgszsize, estimate = .pred)
+```
+
+```{r}
+tidy(fit_lm, conf.int = TRUE)
+```
+
+
+```{r}
+ggplot() + 
+  geom_point(data=szcountfg, aes(x=Strikes, y=avgszsize)) + 
+  geom_smooth(data=szcountfg, aes(x=Strikes, y=avgszsize), method="lm", se=FALSE)
+```
+
+```{r}
+ggplot() + 
+  geom_point(data=szcountfg, aes(x=Balls, y=avgszsize)) + 
+  geom_smooth(data=szcountfg, aes(x=Balls, y=avgszsize), method="lm", se=FALSE)
+```

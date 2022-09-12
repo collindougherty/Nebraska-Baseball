@@ -1,0 +1,134 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+# Modeling Called Strike Probability for NCAA data
+```{r}
+#library management
+library(tidyverse)
+library(tidymodels)
+library(readxl)
+library(ggrepel)
+library(gridExtra)
+library(mgcv)
+```
+
+```{r}
+#base dataframe / to be updated with more data as needed. For now using 2019 data from big ten only
+B1G_Baseball_Data_2019 <- read_excel("~/B1G Baseball Data 2019.xlsx")
+data <- B1G_Baseball_Data_2019
+```
+
+```{r}
+#new dataframe management
+endpa <- data %>% filter(LastPA == 1)
+batters <- endpa %>% group_by(Batter)
+pitchdata <- data %>% select(EventID, BatSide, Balls, Strikes, PitchType, PitchX, PitchY, PitchSide, Delivery, PitchResult)
+# interested specifically in pitches the umpire made a call on. Don't care about BIP
+pitchestaken <- pitchdata %>% filter(PitchResult == "Ball" | PitchResult == "StrikeTaken")
+pitchestaken <- pitchestaken %>% mutate(PitchResult = ifelse(PitchResult == "StrikeTaken", "Strike", "Ball"),
+                                          Strike = ifelse(PitchResult == "Strike", 1,0),
+                                        Ball = ifelse(PitchResult == "Ball",1,0),
+                                        PitchType_Binary = ifelse(PitchType == "Fastball", 1, 0)) %>%
+  mutate_at(6:7, as.numeric) %>% na.omit
+
+pitchestaken <- pitchestaken %>% mutate(
+  PitchResult = as.factor(case_when(
+    PitchResult == "Strike" ~ "Strike",
+    PitchResult == "Ball" ~ "Ball")),
+    
+    BatSide = ifelse(BatSide == "R", 1, 0),
+    PitchSide = ifelse(PitchSide == "R", 1, 0),
+    Delivery = ifelse(Delivery == "WindUp", 1, 0)) %>% na.omit()
+```
+
+```{r}
+# splitting into testing and training data to more rigorously examine the model
+set.seed(1234)
+pitches_split <- initial_split(pitchestaken, prop = .8)
+pitches_train <- training(pitches_split)
+pitches_test <- testing(pitches_split)
+
+
+model_recipe <- 
+  recipe(PitchResult ~ ., data = pitches_train) %>% 
+  update_role(EventID, PitchType, Strike, Ball, new_role = "ID") %>%
+  step_normalize(all_predictors())
+
+summary(model_recipe)
+```
+```{r}
+rf_mod <- 
+  rand_forest() %>% 
+  set_engine("ranger") %>%
+  set_mode("classification")
+```
+
+```{r}
+rf_workflow <- 
+  workflow() %>% 
+  add_model(rf_mod) %>% 
+  add_recipe(model_recipe)
+```
+
+```{r}
+rf_fit_strikeprob <- 
+  rf_workflow %>% 
+  fit(data = pitches_train)
+```
+
+```{r}
+rfpredict <- rf_fit_strikeprob %>% predict(new_data = pitches_train) %>%
+  bind_cols(pitches_train) 
+
+rfpredict <- rf_fit_strikeprob %>% predict(new_data = pitches_train, type="prob") %>%
+  bind_cols(rfpredict)
+```
+
+```{r}
+metrics(rfpredict, PitchResult, .pred_class)
+```
+
+```{r}
+rftestpredict <- rf_fit_strikeprob %>% predict(new_data = pitches_test) %>%
+  bind_cols(pitches_test)
+
+rftestpredict <- rf_fit_strikeprob %>% predict(new_data = pitches_test, type="prob") %>%
+  bind_cols(rftestpredict)
+
+metrics(rftestpredict, PitchResult, .pred_class)
+```
+
+
+```{r}
+rftestpredict %>%
+  conf_mat(PitchResult, .pred_class)
+```
+
+```{r}
+heatmapdata <- rfpredict %>% select(PitchX, PitchY, .pred_Strike)
+heatmapdata <- heatmapdata %>% filter(PitchX > -1.5 & PitchX < 1.5)
+heatmapdata <- heatmapdata %>% filter(PitchY > 1 & PitchY < 4)
+#heatmapdata <- heatmapdata %>% filter(.pred_Strike >.5)
+
+library(MBA)
+heatmapdata=heatmapdata[ order(heatmapdata[,1], heatmapdata[,2],heatmapdata[,3]), ]
+mba.int <- mba.surf(heatmapdata, 300, 300, extend=T)$xyz.est
+library(fields)
+fields::image.plot(mba.int)
+```
+
+
+
+```{r}
+rfpredict %>%
+arrange(.pred_Strike) %>%
+ggplot(aes(x = .pred_Strike, y = Strike)) +
+scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.1)) +
+scale_x_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.1)) +
+geom_smooth(aes(x = .pred_Strike, y = Strike), color = "red", se = F, method = "loess") + 
+# you can use stat_smooth in place of geom_smooth
+geom_abline()
+```
+

@@ -1,0 +1,91 @@
+```{r}
+#library management
+library(tidyverse)
+library(tidymodels)
+library(readxl)
+library(ggrepel)
+library(gridExtra)
+library(mgcv)
+```
+
+```{r}
+B1G_Baseball_Data_2019 <- read_excel("~/B1G Baseball Data 2019.xlsx")
+bigten <- B1G_Baseball_Data_2019
+bip <- bigten %>% filter(PitchResult == "Bip" & Contact != "NA")
+bip <- bip %>% mutate(PitchType_Binary = ifelse(PitchType == "Fastball", 1, 0),
+                      Contact_Binary = as.factor(case_when(
+    Contact == "Hard" ~ "Hard",
+    Contact == "Soft" ~ "Soft",
+    Contact == "Medium" ~ "Medium")))
+```
+
+```{r}
+model_bip <- bip %>% select(EventID, PitchType_Binary, PitchX, PitchY, Contact_Binary, BatSide, PitchSide, Delivery) %>% mutate_at(3:4, as.numeric) %>% na.omit()
+
+model_bip <- model_bip %>% mutate(
+    BatSide = ifelse(BatSide == "R", 1, 0),
+    PitchSide = ifelse(PitchSide == "R", 1, 0),
+    Delivery = ifelse(Delivery == "WindUp", 1, 0))
+```
+
+```{r}
+set.seed(1234)
+pitches_split <- initial_split(model_bip, prop = .8)
+pitches_train <- training(pitches_split)
+pitches_test <- testing(pitches_split)
+
+model_recipe <- 
+  recipe(Contact_Binary ~ ., data = pitches_train) %>% 
+  update_role(EventID, new_role = "ID") %>%
+  step_normalize(all_predictors())
+
+summary(model_recipe)
+```
+
+```{r}
+rf_mod <- 
+  rand_forest() %>% 
+  set_engine("ranger") %>%
+  set_mode("classification")
+```
+
+```{r}
+rf_workflow <- 
+  workflow() %>% 
+  add_model(rf_mod) %>% 
+  add_recipe(model_recipe)
+```
+
+```{r}
+rf_fit_hardhitprob <- 
+  rf_workflow %>% 
+  fit(data = pitches_train)
+```
+
+```{r}
+rfpredict_hard_hit_prob <- rf_fit_hardhitprob %>% predict(new_data = pitches_train) %>%
+  bind_cols(pitches_train) 
+
+rfpredict_hard_hit_prob <- rf_fit_hardhitprob %>% predict(new_data = pitches_train, type="prob") %>%
+  bind_cols(rfpredict_hard_hit_prob)
+```
+
+```{r}
+metrics(rfpredict_hard_hit_prob, Contact_Binary, .pred_class)
+```
+
+```{r}
+rftestpredict <- rf_fit_hardhitprob %>% predict(new_data = pitches_test) %>%
+  bind_cols(pitches_test)
+
+rftestpredict <- rf_fit_hardhitprob %>% predict(new_data = pitches_test, type="prob") %>%
+  bind_cols(rftestpredict)
+
+metrics(rftestpredict, Contact_Binary, .pred_class)
+```
+
+
+```{r}
+rftestpredict %>%
+  conf_mat(Contact_Binary, .pred_class)
+```

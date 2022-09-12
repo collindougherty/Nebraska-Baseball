@@ -1,0 +1,93 @@
+```{r}
+library(tidyverse)
+library(tidymodels)
+```
+
+```{r}
+mlb <- read.csv('fangraphs.csv')
+mlb1 <- read.csv('fangraphs1.csv')
+bigten <- B1G_Baseball_Data_2019
+endpa <- bigten %>% filter(LastPA == 1)
+batters <- endpa %>% group_by(Batter)
+mlb1 <- mlb1 %>% select("ï..Name", AB, H, X1B, X2B, X3B, BB, IBB, SO, HBP, SF, SH, GDP, CS, playerid)
+mlb <- left_join(mlb, mlb1, by = c("ï..Name", "playerid"))
+```
+
+```{r}
+mlb <- mlb %>% mutate(BPA = (X1B + 2*X2B + 3*X3B + 4*HR + BB + IBB + SB + SF + SH + HBP - GDP - CS)/PA)
+qualifying <- mlb %>% filter(PA > 500)
+qualifying <- qualifying %>% mutate("BPA+" = BPA/mean(qualifying$BPA, na.rm = TRUE)*100)
+mlb <- mlb %>% mutate("BPA+" = BPA/mean(qualifying$BPA, na.rm = TRUE)*100)
+```
+
+```{r}
+#creating new variables. Not relevant for this model but will be important for any run expectancy matrix later
+bigten <- bigten %>% mutate(RBI = (ifelse(Runner1End == 'Home', 1, 0)) + (ifelse(Runner2End == 'Home', 1, 0)) + (ifelse(Runner3End == 'Home', 1, 0)))
+```
+
+
+```{r}
+ggplot() + 
+  geom_point(data=qualifying, aes(x=BPA, y=R)) +
+  geom_smooth(data=qualifying, aes(x=BPA, y=R), method="lm")
+```
+```{r}
+set.seed(1234)
+
+game_split <- initial_split(qualifying, prop = .8)
+game_train <- training(game_split)
+game_test <- testing(game_split)
+
+lm_model <- linear_reg() %>%
+    set_engine("lm")
+
+fit_lm <- lm_model %>%
+  fit(R ~ BPA, data = game_train)
+
+trainresults <- game_train %>%
+    bind_cols(predict(fit_lm, game_train))
+
+metrics(trainresults, truth = R, estimate = .pred)
+```
+```{r}
+testresults <- game_test %>%
+    bind_cols(predict(fit_lm, game_test))
+metrics(testresults, truth = R, estimate = .pred)
+```
+
+
+```{r}
+ggplot() + 
+  geom_point(data=qualifying, aes(x=SLG, y=R)) +
+  geom_smooth(data=qualifying, aes(x=SLG, y=R), method="lm")
+```
+
+```{r}
+set.seed(1234)
+
+game_split <- initial_split(qualifying, prop = .8)
+game_train <- training(game_split)
+game_test <- testing(game_split)
+
+lm_model <- linear_reg() %>%
+    set_engine("lm")
+
+fit_lm <- lm_model %>%
+  fit(R ~ SLG, data = game_train)
+
+trainresults <- game_train %>%
+    bind_cols(predict(fit_lm, game_train))
+
+metrics(trainresults, truth = R, estimate = .pred)
+```
+
+```{r}
+testresults <- game_test %>%
+    bind_cols(predict(fit_lm, game_test))
+metrics(testresults, truth = R, estimate = .pred)
+```
+
+```{r}
+endpa <- endpa %>% mutate(RBI = (ifelse(Runner1End == 'Home', 1, 0)) + (ifelse(Runner2End == 'Home', 1, 0)) + (ifelse(Runner3End == 'Home', 1, 0))) 
+```
+

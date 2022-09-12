@@ -1,0 +1,86 @@
+# importing libraries
+```{r message=FALSE, warning=FALSE}
+library(readxl)
+library(gt)
+```
+
+
+# select the data to be used for calculating SDS: trackman or synergy?
+# best if imported via csv, if webscraping, update code here
+```{r}
+# going to write a function once I get trackman data that ensures seamless transition here
+datasource = "synergy"
+
+data <- read_excel("~/B1G Baseball Data 2019.xlsx")
+```
+
+
+# the following code allows for the execution of source code
+# Models were built out in individual .Rmds and need to be executed for SDS calculation
+# ensure that the notebooks are in the same project / file path
+# individual model buildouts with visualizations can be consulted more closely in the 
+# corresponding notebooks
+```{r, message=FALSE, warning=FALSE}
+source_rmd <- function(file, local = FALSE, ...){
+  options(knitr.duplicate.label = 'allow')
+
+  tempR <- tempfile(tmpdir = ".", fileext = ".R")
+  on.exit(unlink(tempR))
+  knitr::purl(file, output=tempR, quiet = TRUE)
+
+  envir <- globalenv()
+  source(tempR, local = envir, ...)
+}
+
+source_rmd("strikeprobability.Rmd")
+source_rmd("swing_probability.Rmd")
+source_rmd("contact_value.Rmd")
+source_rmd("contact_probability.Rmd")
+```
+
+# creating a dataframe with every pitch for which we have pitch location data, and which
+# includes our metrics to be utilized in SDS calculation
+```{r}
+source_rmd("compiler.Rmd")
+```
+
+
+```{r}
+batters
+```
+```{r}
+plot <- ggplot() + 
+  geom_point(data=batters, aes(x=Season_SDS, y=OPS)) +
+  geom_smooth(data=batters, aes(x=Season_SDS, y=OPS), method="lm")
+```
+
+
+```{r}
+top_batters <- batters %>% head(n=10) %>% select(Batter, PA, Season_SDS)
+
+top_batters %>% 
+  gt() %>% 
+  cols_label(Season_SDS = "Swing Decision Score", Batter = "Batter") %>%
+  tab_header(
+    title = "Top SDS Performers 2019",
+    subtitle = "Sum of Swing Decision Score Over the 2019 Season"
+  ) %>%
+  tab_style(
+    style = cell_text(color = "black", weight = "bold", align = "left"),
+    locations = cells_title("title")
+  ) %>% 
+  tab_style(
+    style = cell_text(color = "black", align = "left"),
+    locations = cells_title("subtitle")
+  ) %>%
+  tab_style(
+     locations = cells_column_labels(columns = everything()),
+     style = list(
+       cell_borders(sides = "bottom", weight = px(3)),
+       cell_text(weight = "bold", size=12)
+     )) %>%
+tab_source_note(
+    source_note = md("**By:** Collin Dougherty")
+  ) %>% tab_options(row.striping.include_table_body = FALSE, table.background.color = "white") %>% 
+  opt_row_striping(FALSE)
+```

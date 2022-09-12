@@ -1,0 +1,122 @@
+
+```{r}
+# all the data to see if it's worthwhile to test
+# ended up not including batter or pitcher handedness, nor pitch type. None were significant or improved the model in any way
+# batter handedness will definitely be worth splitting into separate dataframes and running separate models to see if there is a significant difference
+# another factor to consider is batter height
+# creating a count variable? may be better to consider each count opposed to linear balls/strikes relationship
+model_gam <- gam(Strike ~ s(PitchX, PitchY) + Balls + Strikes, data=pitchestaken, binomial)
+summary(model_gam)
+```
+
+```{r}
+# splitting into testing and training data to more rigorously examine the model
+set.seed(1234)
+pitches_split <- initial_split(pitchestaken, prop = .8)
+pitches_train <- training(pitches_split)
+pitches_test <- testing(pitches_split)
+
+# using a binomial method for a binary dependent variable
+model_gam_train <- gam(Strike ~ s(PitchX, PitchY) + Balls + Strikes, data=pitches_train, binomial)
+summary(model_gam_train)
+
+# binding prediction results to new dataframe 
+trainresults <- pitches_train %>%
+    bind_cols(predict.gam(model_gam_train, pitches_train))
+
+# creating a function so that we can obtain probabilities from the logit-odds output
+logit2prob <- function(logit){
+  odds <- exp(logit)
+  prob <- odds / (1 + odds)
+  return(prob)
+}
+
+# mutating to get probabilities and also create a binary variable for visualization purposes
+trainresults <- trainresults %>% mutate(probstrike = logit2prob(trainresults[13]),
+                                        pred.class = ifelse(probstrike > 0.499999999, "Strike", "Ball"))
+
+```
+
+```{r}
+# a glance at the confusion matrix reveals a 96.56% accuracy in the model
+trainresults %>% conf_mat(PitchResult, pred.class)
+```
+
+
+```{r}
+# testing the data on previously unseen data to prevent overfitting
+# binding data to new dataframe
+testresults <- pitches_test %>%
+    bind_cols(predict.gam(model_gam_train, pitches_test))
+testresults <- testresults %>% mutate(probstrike = logit2prob(testresults[13]),
+                                        pred.class = ifelse(probstrike > 0.499999999, "Strike", "Ball"))
+
+# obtaining model performance metrics
+testresults %>% conf_mat(PitchResult, pred.class)
+# according to confusion matrix, accuracy is ~96.54%
+# prediction power remains strong, no dropoff whatsoever
+```
+```{r}
+# visualizing the predictions on the left vs the reality on the right
+p1 <- ggplot() + 
+  geom_point(data=testresults, aes(x=PitchX, y=PitchY, color=pred.class))
+p2 <- ggplot() + 
+  geom_point(data=testresults, aes(x=PitchX, y=PitchY, color=PitchResult))
+grid.arrange(p1, p2, ncol = 2)
+```
+
+```{r}
+# splitting into testing and training data to more rigorously examine the model
+set.seed(1234)
+pitches_split <- initial_split(pitchestaken, prop = .8)
+pitches_train <- training(pitches_split)
+pitches_test <- testing(pitches_split)
+
+# using a binomial method for a binary dependent variable
+model_gam_train <- gam(Strike ~ s(PitchX, PitchY) + Balls + Strikes, data=pitches_train, binomial)
+summary(model_gam_train)
+
+# binding prediction results to new dataframe 
+trainresults <- pitches_train %>%
+    bind_cols(predict.gam(model_gam_train, pitches_train))
+
+# creating a function so that we can obtain probabilities from the logit-odds output
+logit2prob <- function(logit){
+  odds <- exp(logit)
+  prob <- odds / (1 + odds)
+  return(prob)
+}
+
+# mutating to get probabilities and also create a binary variable for visualization purposes
+trainresults <- trainresults %>% mutate(probstrike = logit2prob(trainresults[13]),
+                                        pred.class = ifelse(probstrike > 0.499999999, "Strike", "Ball"))
+
+```
+
+```{r}
+# a glance at the confusion matrix reveals a 96.56% accuracy in the model
+trainresults %>% conf_mat(PitchResult, pred.class)
+```
+
+
+```{r}
+# testing the data on previously unseen data to prevent overfitting
+# binding data to new dataframe
+testresults <- pitches_test %>%
+    bind_cols(predict.gam(model_gam_train, pitches_test))
+testresults <- testresults %>% mutate(probstrike = logit2prob(testresults[13]),
+                                        pred.class = ifelse(probstrike > 0.499999999, "Strike", "Ball"))
+
+# obtaining model performance metrics
+testresults %>% conf_mat(PitchResult, pred.class)
+# according to confusion matrix, accuracy is ~96.54%
+# prediction power remains strong, no dropoff whatsoever
+```
+```{r}
+# visualizing the predictions on the left vs the reality on the right
+p1 <- ggplot() + 
+  geom_point(data=testresults, aes(x=PitchX, y=PitchY, color=pred.class))
+p2 <- ggplot() + 
+  geom_point(data=testresults, aes(x=PitchX, y=PitchY, color=PitchResult))
+grid.arrange(p1, p2, ncol = 2)
+```

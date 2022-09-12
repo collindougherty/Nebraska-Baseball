@@ -1,0 +1,451 @@
+```{r}
+#library management
+library(tidyverse)
+library(tidymodels)
+library(readxl)
+library(ggrepel)
+library(gridExtra)
+library(mgcv)
+library(mltools)
+library(data.table)
+```
+
+```{r}
+B1G_Baseball_Data_2019 <- read_excel("~/B1G Baseball Data 2019.xlsx")
+bigten <- B1G_Baseball_Data_2019
+bip <- bigten %>% filter(PitchResult == "Bip" & Contact != "NA")
+bip <- bip %>% mutate(PitchType_Binary = ifelse(PitchType == "Fastball", 1, 0),
+                      Contact_Binary = as.factor(case_when(
+    Contact == "Hard" ~ "Hard",
+    Contact == "Soft" ~ "Soft",
+    Contact == "Medium" ~ "Medium")))
+```
+
+```{r}
+model_bip <- bip %>% select(EventID, PitchType_Binary, PitchX, PitchY, Contact_Binary, BatSide, PitchSide, Delivery) %>% mutate_at(3:4, as.numeric) %>% na.omit()
+
+model_bip <- model_bip %>% mutate(
+    BatSide = ifelse(BatSide == "R", 1, 0),
+    PitchSide = ifelse(PitchSide == "R", 1, 0),
+    Delivery = ifelse(Delivery == "WindUp", 1, 0))
+```
+
+```{r}
+set.seed(1234)
+pitches_split <- initial_split(model_bip, prop = .8)
+pitches_train <- training(pitches_split)
+pitches_test <- testing(pitches_split)
+
+model_recipe <- 
+  recipe(Contact_Binary ~ ., data = pitches_train) %>% 
+  update_role(EventID, new_role = "ID") %>%
+  step_normalize(all_predictors())
+
+summary(model_recipe)
+```
+
+```{r}
+rf_mod <- 
+  rand_forest() %>% 
+  set_engine("ranger") %>%
+  set_mode("classification")
+```
+
+```{r}
+rf_workflow <- 
+  workflow() %>% 
+  add_model(rf_mod) %>% 
+  add_recipe(model_recipe)
+```
+
+```{r}
+rf_fit_hardhitprob <- 
+  rf_workflow %>% 
+  fit(data = pitches_train)
+```
+
+```{r}
+#new dataframe management
+endpa <- bigten %>% filter(LastPA == 1)
+batters <- endpa %>% group_by(Batter)
+pitchdata <- bigten %>% select(EventID, BatSide, Balls, Strikes, PitchType, PitchX, PitchY, PitchSide, Delivery, PitchResult)
+# interested specifically in pitches the umpire made a call on. Don't care about BIP
+pitchestaken <- pitchdata %>% filter(PitchResult == "Ball" | PitchResult == "StrikeTaken")
+pitchestaken <- pitchestaken %>% mutate(PitchResult = ifelse(PitchResult == "StrikeTaken", "Strike", "Ball"),
+                                          Strike = ifelse(PitchResult == "Strike", 1,0),
+                                        Ball = ifelse(PitchResult == "Ball",1,0),
+                                        PitchType_Binary = ifelse(PitchType == "Fastball", 1, 0)) %>%
+  mutate_at(6:7, as.numeric) %>% na.omit
+
+pitchestaken <- pitchestaken %>% mutate(
+  PitchResult = as.factor(case_when(
+    PitchResult == "Strike" ~ "Strike",
+    PitchResult == "Ball" ~ "Ball")),
+    
+    BatSide = ifelse(BatSide == "R", 1, 0),
+    PitchSide = ifelse(PitchSide == "R", 1, 0),
+    Delivery = ifelse(Delivery == "WindUp", 1, 0)) %>% na.omit()
+```
+
+```{r}
+# splitting into testing and training data to more rigorously examine the model
+set.seed(1234)
+pitches_split <- initial_split(pitchestaken, prop = .8)
+pitches_train <- training(pitches_split)
+pitches_test <- testing(pitches_split)
+
+
+model_recipe <- 
+  recipe(PitchResult ~ ., data = pitches_train) %>% 
+  update_role(EventID, PitchType, Strike, Ball, new_role = "ID") %>%
+  step_normalize(all_predictors())
+
+summary(model_recipe)
+```
+```{r}
+rf_mod <- 
+  rand_forest() %>% 
+  set_engine("ranger") %>%
+  set_mode("classification")
+```
+
+```{r}
+rf_workflow <- 
+  workflow() %>% 
+  add_model(rf_mod) %>% 
+  add_recipe(model_recipe)
+```
+
+```{r}
+rf_fit_strikeprob <- 
+  rf_workflow %>% 
+  fit(data = pitches_train)
+```
+
+```{r}
+rfpredict <- rf_fit_strikeprob %>% predict(new_data = pitches_train) %>%
+  bind_cols(pitches_train) 
+
+rfpredict <- rf_fit_strikeprob %>% predict(new_data = pitches_train, type="prob") %>%
+  bind_cols(rfpredict)
+```
+
+```{r}
+#new dataframe management
+endpa <- bigten %>% filter(LastPA == 1)
+batters <- endpa %>% group_by(Batter)
+pitchdata <- bigten %>% select(EventID, BatSide, Balls, Strikes, PitchType, PitchX, PitchY, PitchSide, Delivery, PitchResult)
+swingpitchdata <- pitchdata %>% mutate(swing = ifelse(PitchResult == "Foul" | PitchResult == "StrikeSwinging" | PitchResult == "Bip", "Swing", "Take"),
+                                  swingbinary = ifelse(PitchResult == "Foul" | PitchResult == "StrikeSwinging" | PitchResult == "Bip", 1, 0),
+                                  PitchType_Binary = ifelse(PitchType == "Fastball", 1, 0),
+                                  swing = as.factor(case_when(
+    swing == "Swing" ~ "Swing",
+    swing == "Take" ~ "Take"))) %>% mutate_at(6:7, as.numeric) %>% na.omit
+```
+
+```{r}
+model_swing <- swingpitchdata %>% select(EventID, PitchType_Binary, PitchX, PitchY, swing, BatSide, PitchSide, Delivery) %>% mutate_at(3:4, as.numeric) %>% na.omit()
+
+model_swing <- model_swing %>% mutate(
+    BatSide = ifelse(BatSide == "R", 1, 0),
+    PitchSide = ifelse(PitchSide == "R", 1, 0),
+    Delivery = ifelse(Delivery == "WindUp", 1, 0))
+```
+
+```{r}
+set.seed(1234)
+pitches_split <- initial_split(model_swing, prop = .8)
+pitches_train <- training(pitches_split)
+pitches_test <- testing(pitches_split)
+
+model_recipe <- 
+  recipe(swing ~ ., data = pitches_train) %>% 
+  update_role(EventID, new_role = "ID") %>%
+  step_normalize(all_predictors())
+
+summary(model_recipe)
+```
+
+```{r}
+rf_mod <- 
+  rand_forest() %>% 
+  set_engine("ranger") %>%
+  set_mode("classification")
+```
+
+```{r}
+rf_workflow <- 
+  workflow() %>% 
+  add_model(rf_mod) %>% 
+  add_recipe(model_recipe)
+```
+
+```{r}
+rf_fit_swingprob <- 
+  rf_workflow %>% 
+  fit(data = pitches_train)
+```
+
+```{r}
+rfpredict <- rf_fit_swingprob %>% predict(new_data = pitches_train) %>%
+  bind_cols(pitches_train) 
+
+rfpredict <- rf_fit_swingprob %>% predict(new_data = pitches_train, type="prob") %>%
+  bind_cols(rfpredict)
+```
+
+```{r}
+#new dataframe management
+pitchdata <- bigten %>% select(EventID, BatSide, Balls, Strikes, PitchType, PitchX, PitchY, PitchSide, Delivery, PitchResult)
+swingdata <- pitchdata %>% filter(PitchResult == "Foul" | PitchResult == "Bip" | PitchResult == "StrikeSwinging")
+
+swingdata <- swingdata %>% mutate(Contact = ifelse(PitchResult == "Bip" | PitchResult == "Foul", "Contact", "whiff"),
+                                  Contact = as.factor(case_when(
+    Contact == "Contact" ~ "Contact",
+    Contact == "whiff" ~ "whiff"))) %>%
+mutate_at(7, as.numeric) %>% na.omit()
+
+swingdata <- swingdata %>% mutate(
+    BatSide = ifelse(BatSide == "R", 1, 0),
+    PitchSide = ifelse(PitchSide == "R", 1, 0),
+    Delivery = ifelse(Delivery == "WindUp", 1, 0))
+
+swingdata <- swingdata %>% mutate(PitchType_Binary = ifelse(PitchType == "Fastball", 1, 0))
+```
+
+```{r}
+set.seed(1234)
+contact_split <- initial_split(swingdata, prop = .8)
+contact_train <- training(contact_split)
+contact_test <- testing(contact_split)
+
+model_recipe <- 
+  recipe(Contact ~ ., data = contact_train) %>% 
+   update_role(EventID, PitchType, PitchResult, new_role = "ID") %>%
+  step_normalize(all_predictors())
+
+summary(model_recipe)
+```
+
+```{r}
+rf_mod <- 
+  rand_forest() %>% 
+  set_engine("ranger") %>%
+  set_mode("classification")
+```
+
+```{r}
+rf_workflow <- 
+  workflow() %>% 
+  add_model(rf_mod) %>% 
+  add_recipe(model_recipe)
+```
+
+```{r}
+rf_fit_contactprob <- 
+  rf_workflow %>% 
+  fit(data = contact_train)
+```
+
+```{r}
+rfpredict <- rf_fit_contactprob %>% predict(new_data = contact_train) %>%
+  bind_cols(contact_train) 
+
+rfpredict <- rf_fit_contactprob %>% predict(new_data = contact_train, type="prob") %>%
+  bind_cols(rfpredict)
+```
+
+- improve hard_hit model
+- weight SDS based on count?
+
+```{r}
+pitchdata <- bigten %>% select(EventID, BatSide, Balls, Strikes, PitchType, PitchX, PitchY, PitchSide, Delivery, PitchResult)
+pitchdata <- pitchdata %>% mutate_at(7, as.numeric) 
+
+pitchdata <- pitchdata %>% mutate(
+  PitchResult = as.factor(case_when(
+    PitchResult == "Strike" ~ "StrikeSwinging",
+    PitchResult == "Strike" ~ "StrikeTaken",
+    PitchResult == "Foul" ~ "Foul",
+    PitchResult == "Ball" ~ "Ball",
+    PitchResult == "Bip" ~ "Bip")),
+
+    BatSide = ifelse(BatSide == "R", 1, 0),
+    PitchSide = ifelse(PitchSide == "R", 1, 0),
+    Delivery = ifelse(Delivery == "WindUp", 1, 0))
+
+pitchdata <- pitchdata %>% mutate(Strike = ifelse(PitchResult == "Strike", 1,0),
+                                  Ball = ifelse(PitchResult == "Ball",1,0),
+                                  Contact = ifelse(PitchResult == "Foul" | PitchResult == "Bip", 1, 0))
+pitchdata <- pitchdata %>% mutate(PitchType_Binary = ifelse(PitchType == "Fastball", 1, 0))
+
+pitchdata <- pitchdata %>% mutate(swing = ifelse(PitchResult == "Foul" | PitchResult == "StrikeSwinging" | PitchResult == "Bip", "Swing", "Take"),
+                                  swingbinary = ifelse(PitchResult == "Foul" | PitchResult == "StrikeSwinging" | PitchResult == "Bip", 1, 0),
+                                  swing = as.factor(case_when(
+    swing == "Swing" ~ "Swing",
+    swing == "Take" ~ "Take"))) %>% mutate_at(6:7, as.numeric) %>% na.omit
+
+pitchdata <- pitchdata %>% na.omit
+```
+```{r}
+B1G_Baseball_Data_2019 <- read_excel("~/B1G Baseball Data 2019.xlsx")
+bigten <- B1G_Baseball_Data_2019
+bip <- bigten %>% filter(PitchResult == "Bip" & Contact != "NA")
+bip <- bip %>% mutate(PitchType_Binary = ifelse(PitchType == "Fastball", 1, 0),
+                      Contact_Binary = as.factor(case_when(
+    Contact == "Hard" ~ "Hard",
+    Contact == "Soft" ~ "Soft",
+    Contact == "Medium" ~ "Medium")))
+
+bip <- bip %>% mutate(
+    BatSide = ifelse(BatSide == "R", 1, 0))
+```
+
+```{r}
+p1 <- plot(bip$ContactX, bip$ContactY)
+```
+
+```{r}
+bip <- bip %>% mutate(location = ifelse(ContactX > 0,"RF", "LF"))
+
+bip <- bip %>% mutate(Rpull = ifelse(BatSide == 1 & location == "LF", 1, 0),
+                      Lpull = ifelse(BatSide == 0 & location == "RF", 1, 0),
+                      pull = ifelse((Rpull == 1 | Lpull == 1), 1, 0))
+```
+
+
+```{r}
+model_bip <- bip %>% select(EventID, Contact, ContactType, pull, TB) 
+
+model_bip$ContactType <- as.factor(model_bip$ContactType)
+model_bip$Contact <- as.factor(model_bip$Contact)
+
+model_bip <- one_hot(as.data.table(model_bip))
+```
+
+```{r}
+set.seed(1234)
+pitches_split <- initial_split(model_bip, prop = .8)
+pitches_train <- training(pitches_split)
+pitches_test <- testing(pitches_split)
+
+model_recipe <- 
+  recipe(TB ~ ., data = pitches_train) %>% 
+  update_role(EventID, new_role = "ID") %>%
+  step_normalize(all_predictors())
+
+summary(model_recipe)
+```
+
+```{r}
+rf_mod <- 
+  rand_forest() %>% 
+  set_engine("ranger") %>%
+  set_mode("regression")
+```
+
+```{r}
+rf_workflow <- 
+  workflow() %>% 
+  add_model(rf_mod) %>% 
+  add_recipe(model_recipe)
+```
+
+```{r}
+rf_fit_contact_value <- 
+  rf_workflow %>% 
+  fit(data = pitches_train)
+```
+
+
+
+```{r}
+strike_prob <- rf_fit_strikeprob %>% predict(new_data = pitchdata) %>%
+  bind_cols(pitchdata) 
+
+strike_prob <- rf_fit_strikeprob %>% predict(new_data = pitchdata, type="prob") %>%
+  bind_cols(strike_prob)
+```
+
+```{r}
+swing_prob <- rf_fit_swingprob %>% predict(new_data = pitchdata) %>%
+  bind_cols(pitchdata) 
+
+swing_prob <- rf_fit_swingprob %>% predict(new_data = pitchdata, type="prob") %>%
+  bind_cols(swing_prob)
+```
+
+```{r}
+contact_prob <- rf_fit_contactprob %>% predict(new_data = pitchdata) %>%
+  bind_cols(pitchdata) 
+
+contact_prob <- rf_fit_contactprob %>% predict(new_data = pitchdata, type="prob") %>%
+  bind_cols(contact_prob)
+```
+
+```{r}
+hard_hit_prob <- rf_fit_hardhitprob %>% predict(new_data = pitchdata) %>%
+  bind_cols(pitchdata) 
+
+hard_hit_prob <- rf_fit_hardhitprob %>% predict(new_data = pitchdata, type="prob") %>%
+  bind_cols(hard_hit_prob)
+```
+
+```{r}
+contact_value <- rf_fit_contact_value %>% predict(new_data = pitches_train) %>%
+  bind_cols(pitches_train) 
+```
+
+```{r}
+#normalizing .pred from 0 to 1 so as to not overly influence SDS score
+contact_value <- contact_value %>% mutate(xTB = (.pred - min(.pred))/(max(.pred) - min(.pred)))
+```
+
+```{r}
+SDS <- swing_prob %>% inner_join(contact_prob, by = c("EventID", "BatSide", "Balls", "Strikes", "PitchType", "PitchX", "PitchY", "PitchSide", "Delivery", "PitchResult", "Strike", "Ball"))
+SDS <- SDS %>% inner_join(strike_prob, by = c("EventID", "BatSide", "Balls", "Strikes", "PitchType", "PitchX", "PitchY", "PitchSide", "Delivery", "PitchResult", "Strike", "Ball"))
+SDS <- SDS %>% inner_join(hard_hit_prob, by = c("EventID", "BatSide", "Balls", "Strikes", "PitchType", "PitchX", "PitchY", "PitchSide", "Delivery", "PitchResult"))
+SDS <- SDS %>% inner_join(contact_value, by = "EventID")
+```
+
+```{r}
+SDS <- SDS %>% mutate(pcontact = .pred_Swing*.pred_Contact)
+
+SDS <- SDS %>% mutate(phardhit = pcontact * .pred_Hard,
+                      sds_swing = SDS$.pred_Strike - (1 - SDS$.pred_Strike) + SDS$.pred_Swing + SDS$.pred_Hard,
+                      sds_take = ((1 - SDS$.pred_Strike) - SDS$.pred_Strike - SDS$.pred_Swing),
+                      sds = (swingbinary.x*sds_swing) + (1-swingbinary.x)*sds_take
+                      )
+```
+
+```{r}
+SDS <- SDS %>% mutate(pcontact = .pred_Swing*.pred_Contact)
+
+SDS <- SDS %>% mutate(phardhit = pcontact * .pred_hard,
+                      sds_swing = SDS$.pred_Strike - (1 - SDS$.pred_Strike) + SDS$.pred_Swing + SDS$.pred_hard,
+                      sds_take = ((1 - SDS$.pred_Strike) - SDS$.pred_Strike - SDS$.pred_Swing),
+                      sds = (swingbinary.x*sds_swing) + (1-swingbinary.x)*sds_take
+                      )
+```
+
+```{r}
+bigten <- bigten %>% mutate_at(31:32, as.numeric)
+bigten <- bigten %>% mutate(BatSide = ifelse(BatSide == "R", 1, 0),
+    PitchSide = ifelse(PitchSide == "R", 1, 0),
+    Delivery = ifelse(Delivery == "WindUp", 1, 0))
+
+final_SDS <- SDS %>% inner_join(bigten, by = "EventID")  
+
+final_SDS <- final_SDS %>% rename(Pitches = PA)
+
+final_SDS <- final_SDS %>% group_by(Batter) %>% summarise(Season_SDS = sum(sds),
+                                                       PA = sum(LastPA),
+                                                       Pitches = sum(Pitches)) 
+
+batters <- final_SDS %>% select(PA, Pitches, Batter, Season_SDS) %>% distinct() 
+
+batters <- batters %>% mutate(SDSperPitch = Season_SDS/Pitches) %>%
+arrange(desc(Season_SDS))
+batters
+```
+

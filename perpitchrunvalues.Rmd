@@ -1,0 +1,140 @@
+```{r}
+#library management
+library(tidyverse)
+library(tidymodels)
+library(readxl)
+library(ggrepel)
+library(gridExtra)
+library(mgcv)
+```
+
+```{r}
+#base dataframe / to be updated with more data as needed. For now using 2019 data from big ten only
+
+# selection bias in that better batters are ahead in the count more
+# potentially could standardize based on k cluster data for individual batters?
+# calculate wOBA constants for college
+# no data on intentional walks
+B1G_Baseball_Data_2019 <- read_excel("~/B1G Baseball Data 2019.xlsx")
+bigten <- B1G_Baseball_Data_2019
+bigten <- bigten %>% mutate(`1B` = ifelse(PAresult == "Single", 1, 0),
+                            `2B` = ifelse(PAresult == "Double", 1, 0),
+                            `3B` = ifelse(PAresult == "Triple", 1, 0),
+                            `HR` = ifelse(PAresult == "HomeRun", 1, 0),
+                            `BB` = ifelse(PAresult == "Walk", 1, 0),
+                            `HBP` = ifelse(PAresult == "HitByPitch", 1, 0),
+                            `SF` = ifelse(PAresult == "SacrificeFly", 1, 0),
+                              )
+# rest of inning runs
+bigtenPA <- bigten %>% group_by(GameID, Inn, InnTB) # %>% filter(InnTB == "T")
+bigtenPA <- bigtenPA %>% mutate(runsscoredPA = ifelse(InnTB == "T", AwayScore-lag(AwayScore, n=1), HomeScore-lag(HomeScore, n=1)),
+                                runsscoredPA = ifelse(is.na(runsscoredPA), RunScore, runsscoredPA),
+                                sumrunsinning = sum(runsscoredPA),
+                                cumrunsinning = cumsum(runsscoredPA),
+                                remainingruns = sumrunsinning - cumrunsinning) %>% select(EventID, GameID, Inn, InnTB, Balls, Strikes, Runners, AwayScore, HomeScore, StartOuts, EndOuts, sumrunsinning, cumrunsinning, remainingruns, PitchResult)
+
+
+#inningruns <- firstlastPA %>% mutate(runs_inning = AwayScore - lag(AwayScore, n=1))
+#firstlastPA <- bigtenPA %>% group_by(GameID, Inn, InnTB) %>% filter(InnPA == 1 | EndOuts == 3, InnTB =="T")
+```
+
+```{r}
+#new dataframe management
+count000 <- bigtenPA %>% filter(Balls == 0, Strikes == 0, StartOuts ==  0) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count001 <- bigtenPA %>% filter(Balls == 0, Strikes == 0, StartOuts ==  1) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count002 <- bigtenPA %>% filter(Balls == 0, Strikes == 0, StartOuts ==  2) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+
+count010 <- bigtenPA %>% filter(Balls == 0, Strikes == 1, StartOuts == 0) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count011 <- bigtenPA %>% filter(Balls == 0, Strikes == 1, StartOuts == 1) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count012 <- bigtenPA %>% filter(Balls == 0, Strikes == 1, StartOuts == 2) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+
+count020 <- bigtenPA %>% filter(Balls == 0, Strikes == 2, StartOuts == 0) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count021 <- bigtenPA %>% filter(Balls == 0, Strikes == 2, StartOuts == 1) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count022 <- bigtenPA %>% filter(Balls == 0, Strikes == 2, StartOuts == 2) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+
+count100 <- bigtenPA %>% filter(Balls == 1, Strikes == 0, StartOuts ==  0) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count101 <- bigtenPA %>% filter(Balls == 1, Strikes == 0, StartOuts ==  1) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count102 <- bigtenPA %>% filter(Balls == 1, Strikes == 0, StartOuts ==  2) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+
+count200 <- bigtenPA %>% filter(Balls == 2, Strikes == 0, StartOuts ==  0) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count201 <- bigtenPA %>% filter(Balls == 2, Strikes == 0, StartOuts ==  1) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count202 <- bigtenPA %>% filter(Balls == 2, Strikes == 0, StartOuts ==  2) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+
+count300 <- bigtenPA %>% filter(Balls == 3, Strikes == 0, StartOuts ==  0) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count301 <- bigtenPA %>% filter(Balls == 3, Strikes == 0, StartOuts ==  1) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count302 <- bigtenPA %>% filter(Balls == 3, Strikes == 0, StartOuts ==  2) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+
+count110 <- bigtenPA %>% filter(Balls == 1, Strikes == 1, StartOuts == 0) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count111 <- bigtenPA %>% filter(Balls == 1, Strikes == 1, StartOuts == 1) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count112 <- bigtenPA %>% filter(Balls == 1, Strikes == 1, StartOuts == 2) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+
+count120 <- bigtenPA %>% filter(Balls == 1, Strikes == 2, StartOuts == 0) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count121 <- bigtenPA %>% filter(Balls == 1, Strikes == 2, StartOuts == 1) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count122 <- bigtenPA %>% filter(Balls == 1, Strikes == 2, StartOuts == 2) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+
+count210 <- bigtenPA %>% filter(Balls == 2, Strikes == 1, StartOuts == 0) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count211 <- bigtenPA %>% filter(Balls == 2, Strikes == 1, StartOuts == 1) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count212 <- bigtenPA %>% filter(Balls == 2, Strikes == 1, StartOuts == 2) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+
+count310 <- bigtenPA %>% filter(Balls == 3, Strikes == 1, StartOuts == 0) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count311 <- bigtenPA %>% filter(Balls == 3, Strikes == 1, StartOuts == 1) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count312 <- bigtenPA %>% filter(Balls == 3, Strikes == 1, StartOuts == 2) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+
+count220 <- bigtenPA %>% filter(Balls == 2, Strikes == 2, StartOuts == 0) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count221 <- bigtenPA %>% filter(Balls == 2, Strikes == 2, StartOuts == 1) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count222 <- bigtenPA %>% filter(Balls == 2, Strikes == 2, StartOuts == 2) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+
+count320 <- bigtenPA %>% filter(Balls == 3, Strikes == 2, StartOuts == 0) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count321 <- bigtenPA %>% filter(Balls == 3, Strikes == 2, StartOuts == 1) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+count322 <- bigtenPA %>% filter(Balls == 3, Strikes == 2, StartOuts == 2) %>% group_by(Runners) %>% mutate(xRuns = mean(remainingruns, na.rm = TRUE)) %>% select(Balls, Strikes, StartOuts, Runners, xRuns) %>% distinct()
+
+run_x_matrix <- rbind(count000, count001, count002, count010, count011, count012, count020, count021, count022, count100, count101, count102, count110, count111, count112, count120, count121, count122, count200, count201, count202, count210, count211, count212, count220, count221, count222, count300, count301, count302, count310, count311, count312, count320, count321, count322)
+
+view(run_x_matrix)
+```
+
+```{r}
+# count00wOBA <- count00 %>% (0.69*sum(count00$BB) + 0.72*sum(count00$HBP) + 0.89*sum(count00$`1B`) + 1.27*sum(count00$`2B`) + 1.62*sum(count00$`3B`) + 2.1*sum(count00$`HR`))/(sum(count00$AB) + sum(count00$BB) + sum(count00$SF) + sum(count00$HBP))
+```
+
+```{r}
+runners0 <- bigten %>% filter(Runners == 0)
+runners1 <- bigten %>% filter(Runners == 1)
+runners2 <- bigten %>% filter(Runners == 2)
+runners3 <- bigten %>% filter(Runners == 3)
+runners12 <- bigten %>% filter(Runners == 12)
+runners23 <- bigten %>% filter(Runners == 23)
+runners13 <- bigten %>% filter(Runners == 13)
+runners123 <- bigten %>% filter(Runners == 123)
+```
+
+
+```{r}
+runexpectancy <- bigtenPA %>% left_join(run_x_matrix)
+
+runexpectancy <- runexpectancy %>% mutate(yBalls = ifelse(PitchResult == "Ball", Balls+1, Balls),
+                                          yStrikes = ifelse(PitchResult == "StrikeSwinging" | PitchResult == "StrikeTaken", Strikes+1, Strikes)
+                                          )
+
+runexpectancy <- runexpectancy %>% mutate(yStrikes = ifelse(Strikes<2, ifelse(PitchResult == "Foul", Strikes+1, yStrikes), yStrikes))
+
+runexpectancy <- runexpectancy %>% mutate(yOuts = EndOuts,
+                                          yRunners = lead(Runners))
+```
+
+```{r}
+run_y_matrix <- run_x_matrix %>% rename(yRuns = xRuns,
+                                        yStrikes = Strikes,
+                                        yBalls = Balls,
+                                        yOuts = StartOuts,
+                                        yRunners = Runners)
+
+runexpectancy <- runexpectancy %>% left_join(run_y_matrix)
+
+runexpectancy <- runexpectancy %>% mutate(yRuns = ifelse(yOuts == 3, 0, yRuns))
+runexpectancy <- runexpectancy %>% mutate(yRuns = ifelse(is.na(yRuns), lead(xRuns), yRuns))
+
+runexpectancy <- runexpectancy %>% mutate(change = yRuns - xRuns)
+```
+
+

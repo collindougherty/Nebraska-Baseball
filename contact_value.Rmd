@@ -1,0 +1,287 @@
+```{r}
+#library management
+library(tidyverse)
+library(tidymodels)
+library(readxl)
+library(ggrepel)
+library(gridExtra)
+library(mgcv)
+library(mltools)
+library(data.table)
+```
+
+```{r}
+#B1G_Baseball_Data_2019 <- read_excel("~/B1G Baseball Data 2019.xlsx")
+#bigten <- B1G_Baseball_Data_2019
+bip <- data %>% filter(PitchResult == "Bip" & Contact != "NA")
+bip <- bip %>% mutate(PitchType_Binary = ifelse(PitchType == "Fastball", 1, 0),
+                      Contact_Binary = as.factor(case_when(
+    Contact == "Hard" ~ "Hard",
+    Contact == "Soft" ~ "Soft",
+    Contact == "Medium" ~ "Medium")))
+
+bip <- bip %>% mutate(
+    BatSide = ifelse(BatSide == "R", 1, 0))
+```
+
+```{r}
+p1 <- plot(bip$ContactX, bip$ContactY)
+```
+
+```{r}
+bip <- bip %>% mutate(location = ifelse(ContactX > 0,"RF", "LF"))
+
+bip <- bip %>% mutate(Rpull = ifelse(BatSide == 1 & location == "LF", 1, 0),
+                      Lpull = ifelse(BatSide == 0 & location == "RF", 1, 0),
+                      pull = ifelse((Rpull == 1 | Lpull == 1), 1, 0))
+```
+
+
+```{r}
+model_bip <- bip %>% select(EventID, Contact, ContactType, pull, TB) 
+
+model_bip$ContactType <- as.factor(model_bip$ContactType)
+model_bip$Contact <- as.factor(model_bip$Contact)
+
+model_bip <- one_hot(as.data.table(model_bip))
+```
+
+```{r}
+set.seed(1234)
+pitches_split <- initial_split(model_bip, prop = .8)
+pitches_train <- training(pitches_split)
+pitches_test <- testing(pitches_split)
+
+model_recipe <- 
+  recipe(TB ~ ., data = pitches_train) %>% 
+  update_role(EventID, new_role = "ID") %>%
+  step_normalize(all_predictors())
+
+summary(model_recipe)
+```
+
+```{r}
+rf_mod <- 
+  rand_forest() %>% 
+  set_engine("ranger") %>%
+  set_mode("regression")
+```
+
+```{r}
+rf_workflow <- 
+  workflow() %>% 
+  add_model(rf_mod) %>% 
+  add_recipe(model_recipe)
+```
+
+```{r}
+rf_fit_hardhitprob <- 
+  rf_workflow %>% 
+  fit(data = pitches_train)
+```
+
+```{r}
+rfpredict <- rf_fit_hardhitprob %>% predict(new_data = pitches_train) %>%
+  bind_cols(pitches_train) 
+```
+
+```{r}
+metrics(rfpredict, TB, .pred)
+```
+
+```{r}
+rftestpredict <- rf_fit_hardhitprob %>% predict(new_data = pitches_test) %>%
+  bind_cols(pitches_test)
+
+metrics(rftestpredict, TB, .pred)
+```
+
+```{r}
+rfpredict %>%
+arrange(.pred) %>%
+ggplot(aes(x = .pred, y = TB)) +
+scale_y_continuous(limits = c(0, 4), breaks = seq(0, 4, by = 0.25)) +
+scale_x_continuous(limits = c(0, 4), breaks = seq(0, 4, by = 0.25)) +
+geom_smooth(aes(x = .pred, y = TB), color = "red", se = F, method = "loess") + 
+# you can use stat_smooth in place of geom_smooth
+geom_abline()
+```
+
+```{r}
+#normalizing .pred from 0 to 1 so as to not overly influence SDS score
+rfpredict <- rfpredict %>% mutate(zTB = (.pred - min(.pred))/(max(.pred) - min(.pred)))
+```
+
+
+
+```{r}
+tbmodel <- rfpredict %>% inner_join(bip, by = "EventID")
+```
+
+
+```{r}
+model <- tbmodel %>% select(EventID, PitchType_Binary, PitchX, PitchY, BatSide, PitchSide, Delivery, zTB) %>% mutate_at(3:4, as.numeric) %>% na.omit()
+
+model <- model %>% mutate(
+    PitchSide = ifelse(PitchSide == "R", 1, 0),
+    Delivery = ifelse(Delivery == "WindUp", 1, 0))
+```
+
+```{r}
+set.seed(1234)
+pitches_split <- initial_split(model, prop = .8)
+pitches_train <- training(pitches_split)
+pitches_test <- testing(pitches_split)
+
+model_recipe <- 
+  recipe(zTB ~ ., data = pitches_train) %>% 
+  update_role(EventID, new_role = "ID") %>%
+  step_normalize(all_predictors())
+
+summary(model_recipe)
+```
+
+```{r}
+rf_mod <- 
+  rand_forest() %>% 
+  set_engine("ranger") %>%
+  set_mode("regression")
+```
+
+```{r}
+rf_workflow <- 
+  workflow() %>% 
+  add_model(rf_mod) %>% 
+  add_recipe(model_recipe)
+```
+
+```{r}
+rf_fit_tbmodel <- 
+  rf_workflow %>% 
+  fit(data = pitches_train)
+```
+
+```{r}
+rfpredict <- rf_fit_tbmodel %>% predict(new_data = pitches_train) %>%
+  bind_cols(pitches_train) 
+```
+
+```{r}
+metrics(rfpredict, zTB, .pred)
+```
+
+```{r}
+rftestpredict <- rf_fit_tbmodel %>% predict(new_data = pitches_test) %>%
+  bind_cols(pitches_test)
+
+metrics(rftestpredict, zTB, .pred)
+```
+
+```{r}
+rftestpredict %>%
+arrange(.pred) %>%
+ggplot(aes(x = .pred, y = zTB)) +
+scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.1)) +
+scale_x_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.1)) +
+geom_smooth(aes(x = .pred, y = zTB), color = "red", se = F, method = "loess") + 
+# you can use stat_smooth in place of geom_smooth
+geom_abline()
+```
+
+
+
+
+```{r}
+lm_mod <- 
+  linear_reg() %>%
+  set_engine("lm") %>%
+  set_mode("regression")
+```
+
+```{r}
+lm_workflow <- 
+  workflow() %>% 
+  add_model(lm_mod) %>% 
+  add_recipe(model_recipe)
+```
+
+```{r}
+lm_fit_tbmodel <- 
+  lm_workflow %>% 
+  fit(data = pitches_train)
+```
+
+```{r}
+lmpredict <- lm_fit_tbmodel %>% predict(new_data = pitches_train) %>%
+  bind_cols(pitches_train) 
+```
+
+```{r}
+metrics(lmpredict, zTB, .pred)
+```
+
+
+```{r}
+# classifying top half of contact quality as "hard hit"
+model <- model %>% mutate(hardhit = ifelse(zTB > 0.09696, "hard", "soft"))
+
+model <- model %>% mutate(hardhit = as.factor(case_when(
+  hardhit == "hard" ~ "hard",
+  hardhit == "soft" ~ "soft")))
+```
+
+```{r}
+set.seed(1234)
+pitches_split <- initial_split(model, prop = .8)
+pitches_train <- training(pitches_split)
+pitches_test <- testing(pitches_split)
+
+model_recipe <- 
+  recipe(hardhit ~ ., data = pitches_train) %>% 
+  update_role(EventID, zTB, new_role = "ID") %>%
+  step_normalize(all_predictors())
+
+summary(model_recipe)
+```
+
+```{r}
+rf_mod <- 
+  rand_forest() %>% 
+  set_engine("ranger") %>%
+  set_mode("classification")
+```
+
+```{r}
+rf_workflow <- 
+  workflow() %>% 
+  add_model(rf_mod) %>% 
+  add_recipe(model_recipe)
+```
+
+```{r}
+rf_fit_hardhitprob <- 
+  rf_workflow %>% 
+  fit(data = pitches_train)
+```
+
+```{r}
+rfpredict_hardhitprob <- rf_fit_hardhitprob %>% predict(new_data = pitches_train) %>%
+  bind_cols(pitches_train) 
+
+rfpredict_hardhitprob <- rf_fit_hardhitprob %>% predict(new_data = pitches_train, type="prob") %>%
+  bind_cols(rfpredict_hardhitprob)
+```
+
+```{r}
+metrics(rfpredict_hardhitprob, hardhit, .pred_class)
+```
+
+```{r}
+rftestpredict <- rf_fit_hardhitprob %>% predict(new_data = pitches_test) %>%
+  bind_cols(pitches_test)
+
+rftestpredict <- rf_fit_hardhitprob %>% predict(new_data = pitches_test, type="prob") %>%
+  bind_cols(rftestpredict)
+
+metrics(rftestpredict, hardhit, .pred_class)
+```

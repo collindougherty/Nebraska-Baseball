@@ -1,0 +1,147 @@
+```{r}
+data <- data %>% mutate(PitchType_Binary = ifelse(PitchType == "Fastball", 1, 0),
+                        BatSide = ifelse(BatSide == "R", 1, 0),
+                        PitchSide = ifelse(PitchSide == "R", 1, 0),
+                        Delivery = ifelse(Delivery == "WindUp", 1, 0),
+                        swing = ifelse(PitchResult == "Foul" | PitchResult == "StrikeSwinging" | PitchResult == "Bip", "Swing", "Take"),
+                        swingbinary = ifelse(PitchResult == "Foul" | PitchResult == "StrikeSwinging" | PitchResult == "Bip", 1, 0),
+                        strike = ifelse(PitchResult == "StrikeSwinging" | PitchResult == "StrikeTaken", 1, 0),
+                        K = ifelse(Strikes == 2 & strike == 1, 1, 0),
+                        BB = ifelse(Balls == 3 & PitchResult == "Ball", 1, 0)) %>% 
+  mutate_at(31:32, as.numeric)
+
+
+data <- data[!is.na(data$PitchY),]
+data <- data[!is.na(data$PitchX),]
+```
+
+
+
+```{r}
+strike_prob <- rf_fit_strikeprob %>% predict(new_data = data) %>%
+  bind_cols(data) 
+
+strike_prob <- rf_fit_strikeprob %>% predict(new_data = data, type="prob") %>%
+  bind_cols(strike_prob)
+```
+
+```{r}
+swing_prob <- rf_fit_swingprob %>% predict(new_data = data) %>%
+  bind_cols(data) 
+
+swing_prob <- rf_fit_swingprob %>% predict(new_data = data, type="prob") %>%
+  bind_cols(swing_prob)
+```
+
+```{r}
+contact_prob <- rf_fit_contactprob %>% predict(new_data = data) %>%
+  bind_cols(data) 
+
+contact_prob <- rf_fit_contactprob %>% predict(new_data = data, type="prob") %>%
+  bind_cols(contact_prob)
+```
+
+```{r}
+hard_hit_prob <- rf_fit_hardhitprob %>% predict(new_data = data) %>%
+  bind_cols(data) 
+
+hard_hit_prob <- rf_fit_hardhitprob %>% predict(new_data = data, type="prob") %>%
+  bind_cols(hard_hit_prob)
+```
+
+
+
+```{r}
+SDS <- swing_prob %>% inner_join(contact_prob, by = c("EventID", "GameID", "AwayTeam", "HomeTeam", "Inn",
+"InnTB", "StartOuts", "EndOuts", "Runners", "AwayScore", "HomeScore", "InnPA",
+"PAresult", "PA", "AB", "HIT", "TB", "OB", "OBPA", "LastPA", "RunScore", "Event",
+"PApitch", "Balls", "Strikes", "PitchResult", "Pitcher", "PitchSide", "Delivery",
+"PitchType", "PitchX", "PitchY", "SZbottom", "SZtop", "PitchZone", "PitchArea",
+"Batter", "BatSide", "SwingType", "ContactType", "Contact", "ContactX", "ContactY",
+"BatterEnd", "BatterHow", "Runner1", "Runner1Start", "Runner1End", "Runner1How",
+"Runner2", "Runner2Start", "Runner2End", "Runner2How", "Runner3", "Runner3Start",
+"Runner3End", "Runner3How", "BatNEB?", "Strikeout", "Walk", "HBP", "PitchType_Binary", "swing", "swingbinary", "strike", "K", "BB"))
+SDS <- SDS %>% inner_join(strike_prob, by = c("EventID", "GameID", "AwayTeam", "HomeTeam", "Inn",
+"InnTB", "StartOuts", "EndOuts", "Runners", "AwayScore", "HomeScore", "InnPA",
+"PAresult", "PA", "AB", "HIT", "TB", "OB", "OBPA", "LastPA", "RunScore", "Event",
+"PApitch", "Balls", "Strikes", "PitchResult", "Pitcher", "PitchSide", "Delivery",
+"PitchType", "PitchX", "PitchY", "SZbottom", "SZtop", "PitchZone", "PitchArea",
+"Batter", "BatSide", "SwingType", "ContactType", "Contact", "ContactX", "ContactY",
+"BatterEnd", "BatterHow", "Runner1", "Runner1Start", "Runner1End", "Runner1How",
+"Runner2", "Runner2Start", "Runner2End", "Runner2How", "Runner3", "Runner3Start",
+"Runner3End", "Runner3How", "BatNEB?", "Strikeout", "Walk", "HBP", "PitchType_Binary", "swing", "swingbinary", "strike", "K", "BB"))
+SDS <- SDS %>% inner_join(hard_hit_prob, by = c("EventID", "GameID", "AwayTeam", "HomeTeam", "Inn",
+"InnTB", "StartOuts", "EndOuts", "Runners", "AwayScore", "HomeScore", "InnPA",
+"PAresult", "PA", "AB", "HIT", "TB", "OB", "OBPA", "LastPA", "RunScore", "Event",
+"PApitch", "Balls", "Strikes", "PitchResult", "Pitcher", "PitchSide", "Delivery",
+"PitchType", "PitchX", "PitchY", "SZbottom", "SZtop", "PitchZone", "PitchArea",
+"Batter", "BatSide", "SwingType", "ContactType", "Contact", "ContactX", "ContactY",
+"BatterEnd", "BatterHow", "Runner1", "Runner1Start", "Runner1End", "Runner1How",
+"Runner2", "Runner2Start", "Runner2End", "Runner2How", "Runner3", "Runner3Start",
+"Runner3End", "Runner3How", "BatNEB?", "Strikeout", "Walk", "HBP", "PitchType_Binary", "swing", "swingbinary", "strike", "K", "BB"))
+```
+
+```{r}
+SDS <- SDS %>% mutate(pcontact = .pred_Swing*.pred_Contact)
+
+SDS <- SDS %>% mutate(phardhit = pcontact * .pred_hard,
+                      sds_swing = SDS$.pred_Strike - (1 - SDS$.pred_Strike) + SDS$.pred_Swing + SDS$.pred_hard,
+                      sds_take = ((1 - SDS$.pred_Strike) - SDS$.pred_Strike - SDS$.pred_Swing),
+                      sds_swing = ifelse(Strikes == 2, sds_swing*2, sds_swing),
+                      sds_take = ifelse(Strikes == 2, sds_take*2, sds_take),
+                      sds = (swingbinary*sds_swing) + (1-swingbinary)*sds_take
+                      )
+```
+
+
+```{r}
+final_SDS <- SDS
+final_SDS <- final_SDS %>% rename(Pitches = PA)
+
+final_SDS <- final_SDS %>% mutate(tOB = OB + LastPA,
+                                  tOBPA = OBPA + LastPA) %>% mutate_at(85:86, as.numeric)
+
+final_SDS <- final_SDS %>% mutate(OB = ifelse(tOB == "2", 1, 0),
+                                  OBPA = ifelse(tOBPA == "2", 1, 0))
+
+final_SDS <- final_SDS %>% group_by(Batter) %>% summarise(Season_SDS = sum(sds),
+                                                       PA = sum(LastPA),
+                                                       Pitches = sum(Pitches),
+                                                       ABs = sum(AB),
+                                                       OBP = sum(OB)/sum(OBPA),
+                                                       SLG = sum(TB)/ABs,
+                                                       OPS = OBP + SLG,
+                                                       K_percentage = sum(K)/PA,
+                                                       BB_percentage = sum(BB)/PA,
+                                                       K_to_BB_ratio = K_percentage/BB_percentage) 
+
+final_SDS <- final_SDS %>% mutate(SDSperPitch = Season_SDS/Pitches) %>%
+arrange(desc(Season_SDS))
+
+batters <- final_SDS %>% select(Batter, PA, Pitches, Season_SDS, SDSperPitch, ABs, SLG, OBP, OPS, K_to_BB_ratio, K_percentage, BB_percentage) %>% distinct() 
+```
+
+
+#some tests to confirm if SDS is worthwhile
+# see significant relationship between season SDS and slugging percentage
+# a significant relationship between OPS and SDS as well
+```{r}
+sig <- batters %>% filter(Pitches > 100)
+sig <- sig %>% filter(K_to_BB_ratio != "Inf")
+sig %>% summarise(correlation = cor(Season_SDS, SLG, method="pearson"))
+```
+
+```{r}
+sig <- batters %>% filter(Pitches > 100)
+sig <- sig %>% filter(K_to_BB_ratio != "Inf")
+sig %>% summarise(correlation = cor(Season_SDS, OPS, method="pearson"))
+```
+
+```{r}
+ggplot() + geom_point(data=sig, aes(x=Season_SDS, y=OPS)) + 
+geom_smooth(data=sig, aes(x=Season_SDS, y=OPS), method="lm")
+```
+```{r}
+ggplot() + geom_point(data=sig, aes(x=Season_SDS, y=SLG)) + 
+geom_smooth(data=sig, aes(x=Season_SDS, y=SLG), method="lm")
+```

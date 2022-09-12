@@ -1,0 +1,86 @@
+```{r}
+#library management
+library(tidyverse)
+library(tidymodels)
+library(readxl)
+library(ggrepel)
+library(gridExtra)
+library(mgcv)
+```
+
+```{r}
+#base dataframe / to be updated with more data as needed. For now using 2019 data from big ten only
+B1G_Baseball_Data_2019 <- read_excel("~/B1G Baseball Data 2019.xlsx")
+bigten <- B1G_Baseball_Data_2019
+```
+
+```{r}
+#new dataframe management
+endpa <- bigten %>% filter(LastPA == 1)
+batters <- endpa %>% group_by(Batter)
+pitchdata <- bigten %>% select(EventID, BatSide, Balls, Strikes, PitchType, PitchX, PitchY, PitchSide, Delivery, PitchResult)
+pitchdata <- pitchdata %>% mutate(swing = ifelse(PitchResult == "Foul" | PitchResult == "StrikeSwinging" | PitchResult == "Bip", "Swing", "Take"),
+                                  swingbinary = ifelse(PitchResult == "Foul" | PitchResult == "StrikeSwinging" | PitchResult == "Bip", 1, 0)) %>% mutate_at(6:7, as.numeric) %>% na.omit
+```
+
+```{r}
+# all the data to see if it's worthwhile to test
+model_gam <- gam(swingbinary ~ s(PitchX, PitchY) + Balls + Strikes + PitchType, data=pitchdata, binomial)
+summary(model_gam)
+```
+
+```{r}
+# splitting into testing and training data to more rigorously examine the model
+set.seed(6849)
+pitches_split <- initial_split(pitchdata, prop = .8)
+pitches_train <- training(pitches_split)
+pitches_test <- testing(pitches_split)
+
+# using a binomial method for a binary dependent variable
+model_gam_train <- gam(swingbinary ~ s(PitchX, PitchY) + Balls + Strikes + PitchType, data=pitches_train, binomial)
+summary(model_gam_train)
+
+# binding prediction results to new dataframe 
+trainresults <- pitches_train %>%
+    bind_cols(predict.gam(model_gam_train, pitches_train))
+
+# creating a function so that we can obtain probabilities from the logit-odds output
+logit2prob <- function(logit){
+  odds <- exp(logit)
+  prob <- odds / (1 + odds)
+  return(prob)
+}
+
+# mutating to get probabilities and also create a binary variable for visualization purposes
+trainresults <- trainresults %>% mutate(probswing = logit2prob(trainresults[13]),
+                                        pred.class = ifelse(probswing > 0.499999999, "Swing", "Take"))
+
+```
+
+```{r}
+# a glance at the confusion matrix reveals ~ 79% accuracy in the model
+trainresults %>% conf_mat(swing, pred.class)
+```
+
+```{r}
+# testing the data on previously unseen data to prevent overfitting
+# binding data to new dataframe
+testresults <- pitches_test %>%
+    bind_cols(predict.gam(model_gam_train, pitches_test))
+testresults <- testresults %>% mutate(probswing = logit2prob(testresults[13]),
+                                        pred.class = ifelse(probswing > 0.499999999, "Swing", "Take"))
+
+# obtaining model performance metrics
+testresults %>% conf_mat(swing, pred.class)
+# according to confusion matrix, accuracy is ~78%
+# prediction power remains strong, no dropoff whatsoever
+```
+
+```{r}
+# visualizing the predictions on the left vs the reality on the right
+p1 <- ggplot() + 
+  geom_point(data=testresults, aes(x=PitchX, y=PitchY, color=pred.class))
+p2 <- ggplot() + 
+  geom_point(data=testresults, aes(x=PitchX, y=PitchY, color=swing))
+grid.arrange(p1, p2, ncol = 2)
+```
