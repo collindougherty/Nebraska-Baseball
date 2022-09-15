@@ -27,19 +27,19 @@ teams <- unique(team_data) %>% select(school, school_id)
 team_ids <- teams$school_id
 
 # filter out the first 3 team ids
-team_ids <- team_ids[c(1:3)]
+#team_ids <- team_ids[c(1:3)]
 ```
 
 ```{r}
-season_lineups <- ncaa_lineups(game_info_url = "https://stats.ncaa.org/contests/2184698/box_score", year = Year)
+season_lineups <- ncaa_lineups(game_info_url = "https://stats.ncaa.org/contests/2184698/box_score", year = Year) %>% mutate(game_url = "https://stats.ncaa.org/contests/2184698/box_score")
 
 for (i in team_ids){
   School <- teams %>% filter(school_id == i)
   School <- School$school
   School <- School[1]
-  schedule_info <- ncaa_schedule_info(teamid = i, Year)
-  game_urls <- schedule_info$game_info_url
-  game_url <- sprintf("%s", game_urls) 
+  try(schedule_info <- ncaa_schedule_info(teamid = i, Year))
+  try(game_urls <- schedule_info$game_info_url)
+  try(game_url <- sprintf("%s", game_urls))
   # season_lineups <- ncaa_lineups(game_info_url = game_url[1], year = Year) %>% filter(school == School)
 
   ## when there is an error, skip q
@@ -47,6 +47,7 @@ for (i in team_ids){
     #skip_to_next <- FALSE
     try(lineup <- ncaa_lineups(game_info_url = q, year = Year))
     lineup <- lineup %>% filter(school == School)
+    lineup <- lineup %>% mutate(game_url = q)
                 #  , error = function(e){skip_to_next <<- TRUE})
     #if(skip_to_next) { next }
     season_lineups <<- rbind(season_lineups, lineup)
